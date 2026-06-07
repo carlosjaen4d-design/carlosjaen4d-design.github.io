@@ -703,6 +703,338 @@ function render(){ const root=$('app'); if(currentView==='dashboard') root.inner
 function showView(view, params={}){ if(view==='visitor') view='dashboard'; if(location.hash && location.hash.startsWith('#visitor=')){ history.replaceState(null,'',location.pathname+location.search); } currentView=view; currentParams=params; setActiveNav(view); closeSidebar(); const titles={dashboard:'Inicio',today:'Plan de hoy',roadmap:'Hoja de ruta',review:'Repaso SRS',diagnostic:'Diagnóstico',practice:'Practicar',examMap:'Mapa de examen',exam:'Simulador de exámenes',theory:'Teoría',mistakes:'Fallos y dudas',writing:'Writing B2',listening:'Listening',progress:'Progreso',settings:'Ajustes',session:'Sesión activa'}; if($('crumbs')) $('crumbs').textContent=titles[view]||view; if($('pageTitle')) $('pageTitle').textContent=titles[view]||'Erasmus B2 Trainer'; render(); updateSidebar(); }
 function updateSidebar(){ const sideNext=$('sideNext'), sideSession=$('sideSession'); if(!sideNext || !sideSession) return; const nm=nextModule(); sideNext.innerHTML = nm ? `<b>${safeText(nm.title)}</b><br><span>${mastery(nm.id)}% dominio · ${safeText(nm.goal)}</span>` : 'Ruta completada'; if(state.session && !state.session.completed){ const q=state.session.ids.length; sideSession.innerHTML=`<b>${safeText(state.session.title)}</b><br>${state.session.index+1}/${q} preguntas<br><button class="btn secondary" style="margin-top:8px;padding:8px 10px" onclick="showView('session')">Volver</button>`; } else sideSession.textContent='Sin sesión activa.'; }
 
+/* Erasmus 50-minute hybrid simulator. Scoped to Simulacro. */
+(function(){
+  const css = `
+  .erasmus50-card{border-color:#2563eb;background:linear-gradient(180deg,#eff6ff,#fff)}
+  .exam-blueprint{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin-top:12px}
+  .exam-blueprint div{border:1px solid var(--line);border-radius:14px;background:#fff;padding:12px}
+  .timer-box{display:flex;align-items:center;gap:10px;flex-wrap:wrap;justify-content:flex-end}
+  .timer-clock{font-variant-numeric:tabular-nums;font-weight:900;font-size:20px;border:1px solid #bfdbfe;background:#eff6ff;color:#1d4ed8;border-radius:12px;padding:8px 11px}
+  .timer-clock.low{border-color:#fed7aa;background:#fff7ed;color:#9a3412}
+  .timer-clock.expired{border-color:#fecaca;background:#fef2f2;color:#991b1b}
+  .creative-panel{border:1px solid #bfdbfe;background:#f8fbff;border-radius:16px;padding:12px;margin-top:14px}
+  .exam-toc{display:flex;gap:6px;flex-wrap:wrap;margin:12px 0}
+  .exam-toc button{min-width:34px;height:34px;border-radius:10px;border:1px solid #cbd5e1;background:#fff;font-weight:800}
+  .exam-toc button.active{background:#2563eb;color:#fff;border-color:#2563eb}
+  .exam-toc button.done{background:#dcfce7;border-color:#86efac;color:#166534}
+  @media(max-width:720px){.exam-blueprint{grid-template-columns:1fr}.timer-box{justify-content:flex-start}.focus-strip{align-items:flex-start}}
+  `;
+  const style = document.createElement('style');
+  style.textContent = css;
+  document.head.appendChild(style);
+
+  if(!EXAM_PROFILES.some(p=>p.id==='erasmus_50_hybrid')){
+    EXAM_PROFILES.unshift({
+      id:'erasmus_50_hybrid',
+      title:'Simulacro Erasmus 50 min',
+      minutes:50,
+      count:42,
+      description:'Formato rapido de FP/Erasmus: MCQ de Grammar & Vocabulary, cloze/reading corto y control creativo dentro del examen.',
+      modules:['conditionals','modal_verbs','prepositions_collocations','linkers_clauses','open_cloze','reading','present_perfect_past_simple','past_perfect','reported_speech','passive_voice','word_formation','transformations']
+    });
+  }
+
+  const oldExamHTML = examHTML;
+  examHTML = function(){
+    return `<div class="hero"><h2>Simulador de examenes</h2><p>Seccion de simulacro: examenes cronometrados, correccion final y ahora un modo Erasmus de 50 minutos con control creativo para pausar, consultar teoria y revelar correccion cuando quieras.</p></div>
+    <div class="card erasmus50-card" style="margin-top:16px">
+      <h3>Simulacro Erasmus 50 min recomendado</h3>
+      <p class="muted">Pensado para una prueba corta de Grado Superior: mucho tipo test, lectura/cloze agil y estructuras B2 de alta rentabilidad.</p>
+      <div class="exam-blueprint">
+        <div><b>30-40%</b><br><span class="small muted">Grammar & Vocabulary: mixed conditionals, modals perfect, phrasal/collocations, linkers.</span></div>
+        <div><b>30%</b><br><span class="small muted">Cloze y reading corto con huecos y contexto.</span></div>
+        <div><b>Probable</b><br><span class="small muted">Listening queda preparado si anades audios/preguntas al banco.</span></div>
+        <div><b>B2 target</b><br><span class="small muted">Objetivo realista: 60-65% minimo, 75% zona comoda.</span></div>
+      </div>
+      <div class="btn-row" style="margin-top:14px">
+        <button class="btn" onclick="startErasmus50Exam()">Iniciar Erasmus 50 min</button>
+        <button class="btn ghost" onclick="showView('examMap')">Ver mapa</button>
+      </div>
+    </div>
+    ${oldExamHTML().replace('<div class="hero"><h2>Simulador de exámenes</h2><p>Modo examen: temporizador, sin pistas por defecto, corrección final e informe de fallos. La v10 añade contratos de respuesta, pistas no reveladoras y corrección parcial más académica por partes para que se parezca más a una prueba B2 escrita.</p></div>','')}`;
+  };
+
+  function uniquePick(mods,count){
+    return pickQuestions(mods,count,true).filter((id,i,a)=>a.indexOf(id)===i);
+  }
+
+  window.startErasmus50Exam = function(){
+    const plan=[
+      [['conditionals','modal_verbs','prepositions_collocations','linkers_clauses'],16],
+      [['open_cloze','word_formation','transformations'],12],
+      [['reading'],10],
+      [['present_perfect_past_simple','past_perfect','reported_speech','passive_voice'],4]
+    ];
+    let ids=[];
+    plan.forEach(([mods,count])=>{ ids=ids.concat(uniquePick(mods,count)); });
+    if(ids.length<42) ids=ids.concat(uniquePick(EXAM_PROFILES.find(p=>p.id==='erasmus_50_hybrid').modules,42-ids.length));
+    ids=[...new Set(ids)].slice(0,42);
+    startSession('Simulacro Erasmus 50 min', ids, 'exam', 'erasmus_50_hybrid');
+    state.session.minutes=50;
+    state.session.remainingSeconds=50*60;
+    state.session.timerRunning=true;
+    state.session.creativeExam=true;
+    state.session.liveReview=false;
+    state.session.locked=false;
+    save();
+    startExamTimer();
+    render();
+  };
+
+  window.formatExamTime = function(sec){
+    sec=Math.max(0,Number(sec)||0);
+    const m=String(Math.floor(sec/60)).padStart(2,'0');
+    const s=String(sec%60).padStart(2,'0');
+    return `${m}:${s}`;
+  };
+
+  window.startExamTimer = function(){
+    clearInterval(window.examTimerInterval);
+    window.examTimerInterval=setInterval(()=>{
+      const s=state.session;
+      if(!s || s.completed || s.mode!=='exam' || !s.timerRunning || s.locked) return;
+      if(typeof s.remainingSeconds!=='number') s.remainingSeconds=(s.minutes||50)*60;
+      s.remainingSeconds-=1;
+      const box=$('examTimerClock');
+      if(box){
+        box.textContent=formatExamTime(s.remainingSeconds);
+        box.classList.toggle('low',s.remainingSeconds<=300 && s.remainingSeconds>0);
+        box.classList.toggle('expired',s.remainingSeconds<=0);
+      }
+      if(s.remainingSeconds<=0){
+        s.remainingSeconds=0;
+        s.timerRunning=false;
+        s.locked=true;
+        save();
+        toast('Tiempo agotado. El simulacro queda bloqueado y se corrige ahora.');
+        completeSession();
+      } else if(s.remainingSeconds%15===0) save();
+    },1000);
+  };
+
+  window.toggleExamTimer = function(){
+    const s=state.session; if(!s)return;
+    s.timerRunning=!s.timerRunning;
+    save();
+    startExamTimer();
+    render();
+    toast(s.timerRunning?'Temporizador reanudado.':'Temporizador pausado.');
+  };
+
+  window.toggleLiveReview = function(){
+    const s=state.session; if(!s)return;
+    s.liveReview=!s.liveReview;
+    save();
+    render();
+  };
+
+  window.jumpQuestion = function(i){
+    const s=state.session; if(!s)return;
+    s.index=Math.max(0,Math.min(s.ids.length-1,i));
+    save();
+    render();
+  };
+
+  window.finishExamNow = function(){
+    if(confirm('Finalizar y corregir el simulacro ahora?')){
+      const s=state.session; if(s){s.timerRunning=false; save();}
+      completeSession();
+    }
+  };
+
+  const oldPauseSession = pauseSession;
+  pauseSession = function(){
+    const s=state.session;
+    if(s && s.mode==='exam') s.timerRunning=false;
+    oldPauseSession();
+  };
+
+  const oldStartExam = startExam;
+  startExam = function(id){
+    if(id==='erasmus_50_hybrid') return startErasmus50Exam();
+    oldStartExam(id);
+    if(state.session && state.session.mode==='exam'){
+      state.session.remainingSeconds=(state.session.minutes||50)*60;
+      state.session.timerRunning=true;
+      save();
+      startExamTimer();
+    }
+  };
+
+  const oldSessionHTML = sessionHTML;
+  sessionHTML = function(){
+    const s=state.session;
+    if(!s || s.completed || s.mode!=='exam') return oldSessionHTML();
+    const q=exerciseById(s.ids[s.index]);
+    if(!q) return `<div class="empty">Pregunta no encontrada.</div>`;
+    if(typeof s.remainingSeconds!=='number') s.remainingSeconds=(s.minutes||50)*60;
+    const answered=s.responses[q.id];
+    const part=examPartForQuestion(q);
+    const showReview=!!s.liveReview;
+    const toc=`<div class="exam-toc">${s.ids.map((id,i)=>`<button class="${i===s.index?'active':''} ${s.responses[id]?'done':''}" onclick="jumpQuestion(${i})">${i+1}</button>`).join('')}</div>`;
+    const timerClass=s.remainingSeconds<=0?'expired':s.remainingSeconds<=300?'low':'';
+    const locked=s.locked || s.remainingSeconds<=0;
+    return `<div class="focus-strip">
+      <div><b>${s.creativeExam?'Simulacro creativo':'Modo examen'}</b> · ${safeText(s.title)} · ${s.index+1}/${s.ids.length}<br><span class="small muted">${part}</span></div>
+      <div class="timer-box"><span id="examTimerClock" class="timer-clock ${timerClass}">${formatExamTime(s.remainingSeconds)}</span><button class="btn secondary" onclick="toggleExamTimer()">${s.timerRunning?'Pausar':'Reanudar'}</button><button class="btn warn" onclick="finishExamNow()">Corregir ya</button></div>
+    </div>
+    <div class="card">
+      <div style="display:flex;justify-content:space-between;gap:12px;align-items:center;flex-wrap:wrap"><div><span class="pill warn">Simulacro</span> <span class="pill">${safeText(moduleById(q.module)?.title||q.module)}</span></div><div class="small muted">${s.minutes||50} min · objetivo 60-65% · ${s.index+1}/${s.ids.length}</div></div>
+      ${pctBar(Math.round((s.index)/s.ids.length*100))}
+      ${toc}
+    </div>
+    <div class="question-box" style="margin-top:16px">
+      ${locked?`<div class="feedback bad"><b>Tiempo agotado.</b> Finaliza para ver el informe.</div>`:''}
+      ${q.passage?`<div class="passage">${wikiText(q.passage,{max:8})}</div>`:''}
+      ${typeGuideHTML(q,true)}
+      <div class="prompt-block"><div class="small muted">${safeText(q.difficulty||'B2')} · ${questionKind(q).replace('_',' ')}</div><div class="question-prompt">${wikiText(q.prompt,{max:12})}</div></div>
+      ${questionInputHTML(q, answered)}
+      <div id="formatWarning" class="input-warning"></div>
+      <div id="feedbackArea">${answered && showReview?feedbackHTML(q,answered):''}</div>
+      <div class="btn-row" style="margin-top:16px">
+        ${!answered && !locked?`<button class="btn" onclick="submitAnswer('${q.id}')">Guardar respuesta</button>`:`<button class="btn" onclick="nextQuestion()">${s.index===s.ids.length-1?'Finalizar':'Siguiente'}</button>`}
+        ${answered?`<button class="btn ghost" onclick="toggleLiveReview()">${showReview?'Ocultar correccion':'Ver si acerte'}</button>`:''}
+        <button class="btn ghost" onclick="showHint('${q.id}')">Pista</button>
+        <button class="btn secondary" onclick="showView('theory',{id:'${q.module}'})">Teoria</button>
+        <button class="btn secondary" onclick="pauseSession()">Salir sin perder</button>
+      </div>
+      <div class="creative-panel"><b>Control creativo:</b> el simulacro conserva presion de tiempo y puntuacion final, pero puedes pausar, saltar preguntas, abrir teoria o revelar correccion cuando decidas.</div>
+    </div>`;
+  };
+
+  const oldSubmitAnswer = submitAnswer;
+  submitAnswer = function(id){
+    const s=state.session;
+    if(s && s.locked){ toast('Tiempo agotado. Finaliza para ver el informe.'); return; }
+    oldSubmitAnswer(id);
+    if(state.session && state.session.mode==='exam') startExamTimer();
+  };
+
+  const oldCompleteSession = completeSession;
+  completeSession = function(){
+    clearInterval(window.examTimerInterval);
+    oldCompleteSession();
+  };
+
+  if(state.session && state.session.mode==='exam' && state.session.timerRunning) startExamTimer();
+})();
+
+/* Smooth interaction layer. Keeps the static app feeling fluid without changing data logic. */
+(function(){
+  const css = `
+  :root{scroll-behavior:smooth}
+  body{transition:background-color .25s ease}
+  body.sidebar-open{overflow:hidden}
+  .main{transition:opacity .22s ease, transform .22s ease}
+  .main.view-swapping{opacity:.35;transform:translateY(6px)}
+  .main.view-ready{animation:viewRise .28s cubic-bezier(.2,.8,.2,1)}
+  @keyframes viewRise{from{opacity:.55;transform:translateY(10px)}to{opacity:1;transform:translateY(0)}}
+  .card,.question-box,.mission-card,.status-banner,.north-star,.module-status-row,.answer-contract,.feedback,.hero{transition:transform .2s ease,box-shadow .2s ease,border-color .2s ease,background-color .2s ease}
+  .card:hover,.question-box:hover{transform:translateY(-1px)}
+  .btn,.nav-btn,.option,.hamb,.exam-toc button{transition:transform .16s ease,box-shadow .16s ease,background-color .16s ease,border-color .16s ease,color .16s ease}
+  .btn:hover,.hamb:hover,.exam-toc button:hover{transform:translateY(-1px);box-shadow:0 10px 22px rgba(15,23,42,.12)}
+  .btn:active,.nav-btn:active,.option:active,.hamb:active{transform:translateY(0) scale(.985)}
+  .nav-btn{position:relative;overflow:hidden}
+  .nav-btn:before{content:"";position:absolute;left:8px;top:50%;width:4px;height:0;border-radius:999px;background:#60a5fa;transform:translateY(-50%);transition:height .2s ease}
+  .nav-btn.active:before,.nav-btn:hover:before{height:62%}
+  .nav-icon{transition:transform .18s ease}
+  .nav-btn:hover .nav-icon,.nav-btn.active .nav-icon{transform:scale(1.08)}
+  .progress>span{transition:width .45s cubic-bezier(.2,.8,.2,1)}
+  .option.selected{box-shadow:0 8px 18px rgba(37,99,235,.12)}
+  .modal-back{backdrop-filter:blur(4px);transition:opacity .18s ease}
+  .modal{animation:modalPop .2s cubic-bezier(.2,.8,.2,1)}
+  @keyframes modalPop{from{opacity:.4;transform:translateY(10px) scale(.985)}to{opacity:1;transform:translateY(0) scale(1)}}
+  .toast{animation:toastIn .22s cubic-bezier(.2,.8,.2,1)}
+  @keyframes toastIn{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:translateY(0)}}
+  .sidebar-backdrop{position:fixed;inset:0;background:rgba(15,23,42,.48);backdrop-filter:blur(3px);opacity:0;pointer-events:none;transition:opacity .24s ease;z-index:49}
+  body.sidebar-open .sidebar-backdrop{opacity:1;pointer-events:auto}
+  .sidebar-close{display:none;position:absolute;right:12px;top:12px;border:1px solid #334155;background:#111827;color:#fff;border-radius:10px;padding:7px 10px;font-weight:900}
+  @media (max-width:960px){
+    .sidebar{display:block!important;position:fixed!important;z-index:50;left:0;top:0;width:84vw;max-width:330px;height:100dvh;transform:translateX(-104%);opacity:.98;visibility:hidden;transition:transform .28s cubic-bezier(.2,.8,.2,1),visibility .28s ease,box-shadow .28s ease}
+    .sidebar.open{transform:translateX(0);visibility:visible;box-shadow:24px 0 60px rgba(15,23,42,.38)}
+    .sidebar-close{display:inline-flex}
+    .brand{padding-right:42px}
+    .mobile-top{box-shadow:0 10px 24px rgba(15,23,42,.12);transition:box-shadow .2s ease}
+  }
+  @media (prefers-reduced-motion:reduce){
+    *,*:before,*:after{animation-duration:.001ms!important;animation-iteration-count:1!important;scroll-behavior:auto!important;transition-duration:.001ms!important}
+  }`;
+  const style=document.createElement('style');
+  style.textContent=css;
+  document.head.appendChild(style);
+
+  function ensureSmoothChrome(){
+    const side=$('sidebar');
+    if(side && !side.querySelector('.sidebar-close')){
+      const b=document.createElement('button');
+      b.className='sidebar-close';
+      b.type='button';
+      b.textContent='Cerrar';
+      b.onclick=closeSidebar;
+      side.appendChild(b);
+    }
+    if(!document.getElementById('sidebarBackdrop')){
+      const back=document.createElement('div');
+      back.id='sidebarBackdrop';
+      back.className='sidebar-backdrop';
+      back.onclick=closeSidebar;
+      document.body.appendChild(back);
+    }
+    const menuBtn=document.querySelector('.mobile-top .hamb');
+    if(menuBtn){
+      menuBtn.setAttribute('aria-controls','sidebar');
+      menuBtn.setAttribute('aria-expanded',document.body.classList.contains('sidebar-open')?'true':'false');
+    }
+  }
+
+  window.toggleSidebar = function(){
+    ensureSmoothChrome();
+    const side=$('sidebar');
+    const open=!side.classList.contains('open');
+    side.classList.toggle('open',open);
+    document.body.classList.toggle('sidebar-open',open);
+    const menuBtn=document.querySelector('.mobile-top .hamb');
+    if(menuBtn) menuBtn.setAttribute('aria-expanded',open?'true':'false');
+  };
+
+  window.closeSidebar = function(){
+    ensureSmoothChrome();
+    const side=$('sidebar');
+    if(side) side.classList.remove('open');
+    document.body.classList.remove('sidebar-open');
+    const menuBtn=document.querySelector('.mobile-top .hamb');
+    if(menuBtn) menuBtn.setAttribute('aria-expanded','false');
+  };
+
+  const oldRender = render;
+  render = function(){
+    const main=document.querySelector('.main');
+    if(main) main.classList.add('view-swapping');
+    oldRender();
+    ensureSmoothChrome();
+    const after=document.querySelector('.main');
+    if(after){
+      after.classList.remove('view-swapping','view-ready');
+      const raf=window.requestAnimationFrame || (fn=>setTimeout(fn,16));
+      raf(()=>after.classList.add('view-ready'));
+    }
+  };
+
+  const oldShowView = showView;
+  showView = function(view, params={}){
+    oldShowView(view, params);
+    const app=$('app');
+    if(app) app.scrollIntoView({block:'start',behavior:'smooth'});
+  };
+
+  window.addEventListener('keydown',e=>{
+    if(e.key==='Escape') closeSidebar();
+  });
+
+  ensureSmoothChrome();
+})();
+
 showView('dashboard');
 </script>
 </body>
