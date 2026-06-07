@@ -1035,6 +1035,57 @@ function updateSidebar(){ const sideNext=$('sideNext'), sideSession=$('sideSessi
   ensureSmoothChrome();
 })();
 
+/* Copy polish layer. Fixes visible accents in generated strings. */
+(function(){
+  function polishCopy(html){
+    return String(html)
+      .replaceAll('qu? punto est?s, qu? toca ahora y hacia d?nde vas','qué punto estás, qué toca ahora y hacia dónde vas')
+      .replaceAll('est?s','estás')
+      .replaceAll('siguiente acci?n','siguiente acción')
+      .replaceAll('bot?n','botón')
+      .replaceAll('Lectura r?pida','Lectura rápida')
+      .replaceAll('Pr?ximo hito','Próximo hito')
+      .replaceAll('teor?','teoría')
+      .replaceAll('pr?ctica','práctica')
+      .replaceAll('Tama?o sesi?n','Tamaño sesión')
+      .replaceAll('correcci?n','corrección')
+      .replaceAll('Intenci?n correcta con fallo peque?o','Intención correcta con fallo pequeño')
+      .replaceAll('? Bien = 1','✅ Bien = 1')
+      .replaceAll('? Dudosa = 0,5','❔ Dudosa = 0,5')
+      .replaceAll('? Mal = 0','❌ Mal = 0')
+      .replaceAll('Necesita teor?a + pr?ctica.','Necesita teoría + práctica.')
+      .replaceAll('Simulador de examenes','Simulador de exámenes')
+      .replaceAll('Seccion de simulacro','Sección de simulacro')
+      .replaceAll('examenes cronometrados','exámenes cronometrados')
+      .replaceAll('correccion final','corrección final')
+      .replaceAll('consultar teoria','consultar teoría')
+      .replaceAll('revelar correccion','revelar corrección')
+      .replaceAll('rapido de FP/Erasmus','rápido de FP/Erasmus')
+      .replaceAll('cloze/reading agil','cloze/reading ágil')
+      .replaceAll('anades audios','añades audios')
+      .replaceAll('minimo','mínimo')
+      .replaceAll('zona comoda','zona cómoda')
+      .replaceAll('Ocultar correccion','Ocultar corrección')
+      .replaceAll('Ver si acerte','Ver si acerté')
+      .replaceAll('Teoria','Teoría')
+      .replaceAll('teoria','teoría')
+      .replaceAll('presion de tiempo','presión de tiempo')
+      .replaceAll('puntuacion final','puntuación final')
+      .replaceAll('Control creativo:</b> el simulacro conserva','Control creativo:</b> el simulacro conserva')
+      .replaceAll('correccion cuando decidas','corrección cuando decidas')
+      .replaceAll('Formato rapido','Formato rápido')
+      .replaceAll('Objetivo realista','Objetivo realista');
+  }
+  const oldDashboardHTML = dashboardHTML;
+  dashboardHTML = function(){ return polishCopy(oldDashboardHTML()); };
+  const oldExamHTML2 = examHTML;
+  examHTML = function(){ return polishCopy(oldExamHTML2()); };
+  const oldSessionHTML2 = sessionHTML;
+  sessionHTML = function(){ return polishCopy(oldSessionHTML2()); };
+  const oldSettingsHTML = settingsHTML;
+  settingsHTML = function(){ return polishCopy(oldSettingsHTML()); };
+})();
+
 showView('dashboard');
 </script>
 </body>
